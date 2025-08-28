@@ -142,7 +142,7 @@ class ListDirectoryUtilJvmTest {
     }
 
     @Test
-    fun `respects maxDepth limit`() = runTest {
+    fun `respects maxDepth limit with multiple files`() = runTest {
         // Structure:
         // level1/
         // └── level2/
@@ -156,7 +156,30 @@ class ListDirectoryUtilJvmTest {
         val metadata = assertNotNull(fs.metadata(level1))
         val entry = buildDirectoryTree(fs, level1, metadata, maxDepth = 1) as FileSystemEntry.Folder
 
-        // At maxDepth=1, level1 should have null entries because level2 has multiple children
+        // level1 has 1 child (level2 directory), so it unwraps
+        // level2 has multiple children at maxDepth=1, so its entries should be null
+        val level2Folder = assertNotNull(entry.entries).single() as FileSystemEntry.Folder
+        assertNull(level2Folder.entries)
+    }
+
+    @Test
+    fun `respects maxDepth limit with multiple directories at root`() = runTest {
+        // Structure:
+        // level1/
+        // ├── dir1/
+        // │   └── file1.txt
+        // └── dir2/
+        //     └── file2.txt
+        val level1 = createDir("level1")
+        val dir1 = level1.resolve("dir1").createDirectories()
+        val dir2 = level1.resolve("dir2").createDirectories()
+        dir1.resolve("file1.txt").createFile().writeText("content1")
+        dir2.resolve("file2.txt").createFile().writeText("content2")
+
+        val metadata = assertNotNull(fs.metadata(level1))
+        val entry = buildDirectoryTree(fs, level1, metadata, maxDepth = 1) as FileSystemEntry.Folder
+
+        // level1 has multiple children at maxDepth=1, so entries should be null
         assertNull(entry.entries)
     }
 
@@ -192,5 +215,27 @@ class ListDirectoryUtilJvmTest {
         val file = entries.single() as FileSystemEntry.File
         assertEquals("file.txt", file.name)
         assertEquals(FileSystemEntry.File.Content.None, file.content)
+    }
+
+    @Test
+    fun `unwrapping stops when reaching files`() = runTest {
+        // Structure:
+        // root/
+        // └── chain1/
+        //     └── chain2/
+        //         └── final.txt
+        val root = createDir("root")
+        val chain1 = root.resolve("chain1").createDirectories()
+        val chain2 = chain1.resolve("chain2").createDirectories()
+        chain2.resolve("final.txt").createFile().writeText("content")
+
+        val rootMeta = assertNotNull(fs.metadata(root))
+        val entry = buildDirectoryTree(fs, root, rootMeta, maxDepth = 1) as FileSystemEntry.Folder
+
+        // Should unwrap through single directories until reaching the file
+        val chain1Folder = assertNotNull(entry.entries).single() as FileSystemEntry.Folder
+        val chain2Folder = assertNotNull(chain1Folder.entries).single() as FileSystemEntry.Folder
+        val finalFile = assertNotNull(chain2Folder.entries).single() as FileSystemEntry.File
+        assertEquals("final.txt", finalFile.name)
     }
 }

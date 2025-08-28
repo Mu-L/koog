@@ -49,31 +49,44 @@ private suspend fun <Path> buildFolderWithUnwrap(
     val children = fs.list(path).filter { child ->
         filter == null || filter.matches(fs.name(child))
     }
-
-    return if (maxDepth == 1 && children.size != 1) {
-        FileSystemEntry.Folder(
+    if (maxDepth == 1 && children.size > 1) {
+        return FileSystemEntry.Folder(
             name = fs.name(path),
             path = fs.toAbsolutePathString(path),
             entries = null,
             hidden = metadata.hidden
         )
-    } else {
-        val entries = children.mapNotNull { child ->
-            val childMeta = fs.metadata(child) ?: return@mapNotNull null
-            buildDirectoryTree(
-                fs = fs,
-                path = child,
-                metadata = childMeta,
-                maxDepth = if (children.size == 1) maxDepth else maxDepth - 1,
-                filter = filter
-            )
-        }
+    }
 
-        FileSystemEntry.Folder(
-            name = fs.name(path),
-            path = fs.toAbsolutePathString(path),
-            entries = entries,
-            hidden = fs.metadata(path)?.hidden ?: false
+    val entries = children.mapNotNull { child ->
+        val childMeta = fs.metadata(child) ?: return@mapNotNull null
+
+        if (childMeta.type == FileMetadata.FileType.File) {
+            return@mapNotNull buildFileEntryForTree(fs, child, childMeta)
+        }
+        val nextDepth = if (shouldUnwrap(children, childMeta)) maxDepth else maxDepth - 1
+        if (nextDepth <= 0) return@mapNotNull null
+        buildDirectoryTree(
+            fs = fs,
+            path = child,
+            metadata = childMeta,
+            maxDepth = nextDepth,
+            filter = filter
         )
     }
+
+    return FileSystemEntry.Folder(
+        name = fs.name(path),
+        path = fs.toAbsolutePathString(path),
+        entries = entries,
+        hidden = metadata.hidden
+    )
+}
+
+/**
+ * Determines if we should unwrap (preserve depth) for single directory paths.
+ * Only unwrap if there's exactly one child AND that child is a directory.
+ */
+private fun <Path> shouldUnwrap(children: List<Path>, childMeta: FileMetadata): Boolean {
+    return children.size == 1 && childMeta.type == FileMetadata.FileType.Directory
 }
